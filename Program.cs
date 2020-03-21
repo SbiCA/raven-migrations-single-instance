@@ -74,7 +74,7 @@ namespace MigrationTests
             }
             catch (ConcurrencyException)
             {
-                _logger.LogWarning("Count not acquire lock already running migration");
+                _logger.LogWarning("Could not acquire lock ... already running migration or got cancelled without proper shutdown");
             }
         }
 
