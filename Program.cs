@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Reflection;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using Raven.Client;
 using Raven.Client.Documents;
+using Raven.Client.Documents.Operations.CompareExchange;
 using Raven.Client.Documents.Operations.Expiration;
 using Raven.Client.Exceptions;
+using Raven.Client.ServerWide.Operations.Configuration;
 using Raven.Migrations;
 
 namespace MigrationTests
@@ -43,6 +46,51 @@ namespace MigrationTests
 
         public new void Run()
         {
+            LockUsingCompareExchange();
+            // LockUsingOptimisticConcurrency();
+        }
+
+        private void LockUsingCompareExchange()
+        {
+            // At this point, the user document has an Id assigned
+            long? lockAcquired = null;
+            using var session = _store.OpenSession();
+            try
+            {
+                var result = _store.Operations.Send(
+                    new PutCompareExchangeValueOperation<string>("LockMigrations", "locked", 0));
+
+                if (result.Successful == false)
+                {
+                    _logger.LogWarning(
+                        "Could not acquire lock ... already running migration or got cancelled without proper shutdown");
+                    return;
+                }
+
+                lockAcquired = result.Index;
+                _logger.LogInformation("acquired migration lock");
+                base.Run();
+            }
+            finally
+            {
+                if (lockAcquired is {})
+                {
+                    var unlocked = _store.Operations.Send(
+                        new DeleteCompareExchangeValueOperation<string>("LockMigrations", lockAcquired.Value));
+                    if (unlocked.Successful == false)
+                    {
+                        _logger.LogError("Could not release lock, this need manual intervention");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("released migration lock");
+                    }
+                }
+            }
+        }
+
+        private void LockUsingOptimisticConcurrency()
+        {
             try
             {
                 using var session = _store.OpenSession();
@@ -52,14 +100,12 @@ namespace MigrationTests
                     DeleteFrequencyInSec = 60
                 }));
 
-
                 var expiry = DateTime.UtcNow.AddMinutes(10);
                 session.Advanced.UseOptimisticConcurrency = true;
                 var lockDocument = new LockDocument();
                 session.Store(lockDocument);
                 session.Advanced.GetMetadataFor(lockDocument)[Constants.Documents.Metadata.Expires] = expiry;
-                session.Advanced
-                    .WaitForReplicationAfterSaveChanges(majority: true);
+                session.Advanced.WaitForReplicationAfterSaveChanges(majority: true);
                 session.SaveChanges();
 
                 try
@@ -76,7 +122,8 @@ namespace MigrationTests
             }
             catch (ConcurrencyException)
             {
-                _logger.LogWarning("Could not acquire lock ... already running migration or got cancelled without proper shutdown");
+                _logger.LogWarning(
+                    "Could not acquire lock ... already running migration or got cancelled without proper shutdown");
             }
         }
 
@@ -100,6 +147,7 @@ namespace MigrationTests
             };
             session.Store(doc);
             session.SaveChanges();
+            Thread.Sleep(20_000);
         }
     }
 }
