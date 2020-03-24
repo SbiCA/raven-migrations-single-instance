@@ -58,6 +58,8 @@ namespace MigrationTests
                 var lockDocument = new LockDocument();
                 session.Store(lockDocument);
                 session.Advanced.GetMetadataFor(lockDocument)[Constants.Documents.Metadata.Expires] = expiry;
+                session.Advanced
+                    .WaitForReplicationAfterSaveChanges(majority: true);
                 session.SaveChanges();
 
                 try
