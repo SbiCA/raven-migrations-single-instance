@@ -52,7 +52,6 @@ namespace MigrationTests
 
         private void LockUsingCompareExchange()
         {
-            // At this point, the user document has an Id assigned
             long? lockAcquired = null;
             using var session = _store.OpenSession();
             try
@@ -147,7 +146,6 @@ namespace MigrationTests
             };
             session.Store(doc);
             session.SaveChanges();
-            Thread.Sleep(20_000);
         }
     }
 }
